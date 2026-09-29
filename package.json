@@ -1,0 +1,19 @@
+{
+  "name": "eval-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "deep-swe / Harbor-format eval runner driving pi-web batch API (pier-equivalent)",
+  "bin": {
+    "deepswe": "bin/deepswe.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "undici": "^8.11.2"
+  }
+}
