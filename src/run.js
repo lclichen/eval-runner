@@ -307,9 +307,14 @@ async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb
     // dies on a memory dip, elapsed=0, retry passes) — so warm the build
     // cache with retries BEFORE grading; test.sh then hits only warm builds.
     const verifyEnv = "export HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod GOMAXPROCS=2 GOFLAGS=\"${GOFLAGS:-} -p=2\"";
+    // Warm with `go vet`: it COMPILES the test binaries (pulling in runtime/cgo,
+    // which plain `go build` of pure-Go code never touches) without running
+    // tests. A first-build failure inside test.sh doesn't just lose time — the
+    // build events kill the v0.1.0 ctrf reporter and zero out base-ctrf.json
+    // (p2p "missing from report"). Retries absorb the small-host memory dips.
     await driver.exec(
       handle,
-      `${verifyEnv}; cd /app && for i in 1 2 3 4 5; do go build ./... >/dev/null 2>&1 && { echo warmup-ok; break; }; echo warmup-retry-$i; sleep 3; done`,
+      `${verifyEnv}; cd /app && for i in 1 2 3 4 5; do go vet ./... >/dev/null 2>&1 && { echo warmup-ok; break; }; echo warmup-retry-$i; sleep 3; done`,
       { cwd: "/app", timeoutSec: 900 },
     );
     const r = await driver.exec(
