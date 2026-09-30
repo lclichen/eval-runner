@@ -41,6 +41,7 @@ Usage:
   deepswe list       --tasks <dir> [--n-tasks N --sample-seed S]
   deepswe convert-sif --tasks <dir> --out-dir <dir> [--only id,id]
   deepswe report     --job <dir>
+  deepswe cleanup    --run-id <id> | --older-than 7d | --all
 
 Options:
   --tasks <dir>          deep-swe tasks/ root (or any dir of Harbor task dirs)
@@ -55,7 +56,8 @@ Options:
   --run-id <name>        job dir name under jobs/ (default: timestamp)
   --jobs-dir <dir>       output root (default ./jobs)
   --tool-names a,b,c     agent tool allowlist (default: bash,read,write,edit,glob,grep)
-  --keep-containers      do not stop/remove task containers (debugging)
+  --keep-containers      do not even stop containers at stage end (debugging)
+  --destroy              eager destroy after each stage (disk-tight hosts); default stop-retain keeps overlays for artifact recovery, reclaim via deepswe cleanup
   --no-auto-resume       do not resume interrupted pi-web tasks
 `);
   process.exit(code);

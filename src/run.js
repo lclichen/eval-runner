@@ -19,6 +19,14 @@ const STAGES = ["pending", "container", "agent", "collect", "verify", "done"];
 // a killed runner otherwise leaks verify/agent containers until the platform
 // quota fills (observed: two orphans after timeout-killed runs). Idempotent
 // stop→destroy; best-effort, never blocks exit for long.
+/** Stop (and maybe destroy) a container per the run policy. */
+async function releaseContainer(driver, handle, policy) {
+  await driver.stopContainer(handle).catch(() => {});
+  if (policy === "destroy" && driver.removeContainer) {
+    await driver.removeContainer(handle).catch(() => {});
+    untrackContainer(handle);
+  }
+}
 const liveContainers = [];
 function trackContainer(driver, handle) {
   liveContainers.push({ driver, handle });
@@ -32,11 +40,12 @@ async function cleanupLiveContainers(reason) {
   if (cleaningUp) return;
   cleaningUp = true;
   if (liveContainers.length === 0) process.exit(0);
-  console.error(`[${reason}] destroying ${liveContainers.length} live container(s)...`);
+  console.error(`[${reason}] stopping ${liveContainers.length} live container(s) (overlays kept; deepswe cleanup to destroy)...`);
   const deadline = Date.now() + 15_000;
   await Promise.allSettled(liveContainers.map(async ({ driver, handle }) => {
     await driver.stopContainer(handle).catch(() => {});
-    if (driver.removeContainer) await driver.removeContainer(handle).catch(() => {});
+    // SIGTERM keeps overlays (artifact recovery) — destroy stays client-driven
+    // via `deepswe cleanup`; only the instance is released.
   }));
   if (Date.now() > deadline) console.error("[cleanup] slow container teardown; exiting anyway");
   process.exit(0);
@@ -53,6 +62,12 @@ export async function runEval(config) {
     toolNames, thinkingLevel, inputTimeoutMs,
     agentSlackSec = 600,
     keepContainers = false,
+    /** Container lifecycle after a stage/task ends.
+     * - stop-retain (default): stop the instance (frees CPU/RAM, overlay KEPT
+     *   for artifact recovery) — client destroys later via `cleanup` (the
+     *   platform has NO auto-GC for stopped containers; quota counts them).
+     * - destroy: old eager behavior for disk/quota-tight hosts (the 4G VM). */
+    containerPolicy = "stop-retain",
     /** Oracle mode: grade the reference solution instead of an agent run —
      * validates the collect→verify→reward chain (expect reward=1). */
     oracle = false,
@@ -259,15 +274,13 @@ export async function runEval(config) {
       // VM) cannot keep two task-spec containers alive at once. (Oracle mode
       // never created one — agentContainer is undefined there.)
       if (agentContainer && !keepContainers) {
-        await driver.stopContainer(agentContainer).catch(() => {});
-        if (driver.removeContainer) await driver.removeContainer(agentContainer).catch(() => {});
-        untrackContainer(agentContainer);
+        await releaseContainer(driver, agentContainer, containerPolicy);
         agentReleased = true;
       }
 
       // ---- stage: verify (fresh container, pristine repo + tests) ----
       if (st.stage !== "verify-done") {
-        const reward = await verifyTask(task, taskDir, driver, { keepContainers, cpu: taskCpu, memoryMb: taskMemoryMb });
+        const reward = await verifyTask(task, taskDir, driver, { keepContainers, cpu: taskCpu, memoryMb: taskMemoryMb, policy: containerPolicy });
         st.reward = reward;
         st.stage = "verify-done";
         saveState();
@@ -278,9 +291,7 @@ export async function runEval(config) {
       saveState();
     } finally {
       if (agentContainer && !keepContainers && !agentReleased) {
-        await driver.stopContainer(agentContainer).catch(() => {});
-        if (driver.removeContainer) await driver.removeContainer(agentContainer).catch(() => {});
-        untrackContainer(agentContainer);
+        await releaseContainer(driver, agentContainer, containerPolicy);
       }
     }
   }
@@ -290,7 +301,7 @@ function stageDone(current, target) {
   return STAGES.indexOf(current ?? "pending") >= STAGES.indexOf(target);
 }
 
-async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb, log = console }) {
+async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb, policy, log = console }) {
   const { imageId } = await driver.ensureImage(task.dockerImage);
   const handle = await driver.createContainer({
     imageId,
@@ -359,8 +370,7 @@ async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb
     return reward;
   } finally {
     if (!keepContainers) {
-      await driver.stopContainer(handle).catch(() => {});
-      if (driver.removeContainer) await driver.removeContainer(handle).catch(() => {});
+      await releaseContainer(driver, handle, policy);
     }
     untrackContainer(handle);
   }

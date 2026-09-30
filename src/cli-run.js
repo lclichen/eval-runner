@@ -61,6 +61,7 @@ export async function runCommand(args) {
     sampleSeed: args.sampleSeed,
     toolNames: Array.isArray(args.toolNames) ? args.toolNames : undefined,
     keepContainers: Boolean(args.keepContainers),
+    containerPolicy: args.destroy ? "destroy" : "stop-retain",
     autoResume: !args.noAutoResume,
     onlyTasks: Array.isArray(args.only) ? args.only : [],
     ...(args.cpu ? { cpuOverride: Number(args.cpu) } : {}),
@@ -112,6 +113,11 @@ export async function sifCommand(args) {
   } else {
     console.log(script);
   }
+}
+
+export async function cleanupCommand(args) {
+  const { cleanupCommand: run } = await import("./cleanup.js");
+  await run(args);
 }
 
 export async function reportCommand(args) {

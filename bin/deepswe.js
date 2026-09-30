@@ -30,6 +30,11 @@ try {
       await sifCommand(parseArgs(rest));
       break;
     }
+    case "cleanup": {
+      const { cleanupCommand } = await import("../src/cli-run.js");
+      await cleanupCommand(parseArgs(rest));
+      break;
+    }
     case "report": {
       const { reportCommand } = await import("../src/cli-run.js");
       await reportCommand(parseArgs(rest));
