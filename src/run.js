@@ -180,7 +180,9 @@ export async function runEval(config) {
 
     try {
       // ---- stage: agent ----
-      if (st.stage !== "agent-done") {
+      // Oracle mode jumps straight past the agent stage (stage is already
+      // "collect-done"); the resume path keeps its "agent-done" journal check.
+      if (!oracle && st.stage !== "agent-done") {
         if (!st.piwebTaskId) {
           const created = await piweb.createTask({
             containerId: agentContainer.id,
