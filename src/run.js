@@ -310,16 +310,27 @@ async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb
     // different cache directory (the default ~/.cache/go-build) leaves the
     // graded runs cold and the first runtime/cgo build fails again.
     const verifyEnv = "export HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod GOCACHE=/app/.gocache GOMAXPROCS=2 GOFLAGS=\"${GOFLAGS:-} -p=2\"";
-    // Warm with `go vet`: it COMPILES the test binaries (pulling in runtime/cgo,
-    // which plain `go build` of pure-Go code never touches) without running
-    // tests. A first-build failure inside test.sh doesn't just lose time — the
-    // build events kill the v0.1.0 ctrf reporter and zero out base-ctrf.json
-    // (p2p "missing from report"). Retries absorb the small-host memory dips.
-    await driver.exec(
-      handle,
-      `${verifyEnv}; cd /app && for i in 1 2 3 4 5; do go vet ./... >/dev/null 2>&1 && { echo warmup-ok; break; }; echo warmup-retry-$i; sleep 3; done`,
-      { cwd: "/app", timeoutSec: 900 },
-    );
+    // Warm by COMPILING the test binaries of exactly the packages under test
+    // (from tests/config.json node ids). `go test -c` links what `go test`
+    // links — including runtime/cgo, which plain `go build` never touches.
+    // A first-build failure inside test.sh doesn't just lose time: the build
+    // events kill the v0.1.0 ctrf reporter and zero out base-ctrf.json (p2p
+    // "missing from report"). `go vet` is NOT a valid warmup — repos with a
+    // wasm package (syscall/js build constraints) make it exit non-zero
+    // forever. Retries absorb small-host memory dips.
+    const cfg = JSON.parse(readFileSync(join(task.dir, "tests", "config.json"), "utf8"));
+    const pkgs = [...new Set([...(cfg.f2p_node_ids ?? []), ...(cfg.p2p_node_ids ?? [])]
+      .map((id) => String(id).split(".").slice(0, -1).join("."))
+      .filter(Boolean))];
+    if (pkgs.length > 0 && task.dockerImage.toLowerCase().includes("swe-bench")) {
+      const warm = await driver.exec(
+        handle,
+        `${verifyEnv}; cd /app && for pkg in ${pkgs.map((p) => JSON.stringify(p)).join(" ")}; do` +
+          ` for i in 1 2 3 4 5; do go test -c -o /dev/null "$pkg" >/dev/null 2>&1 && { echo "warm-ok $pkg"; break; }; echo "warm-retry $pkg #$i"; sleep 3; done; done`,
+        { cwd: "/app", timeoutSec: 1200 },
+      );
+      log.info?.(`[${task.id}] warmup: ${(warm.stdout || "").trim().split("\n").filter((l) => l.startsWith("warm-ok")).length}/${pkgs.length} packages`);
+    }
     const r = await driver.exec(
       handle,
       `${verifyEnv}; bash /tests/test.sh`,
