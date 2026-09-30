@@ -301,10 +301,14 @@ async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb
     // (the image's `go mod download` cache) — without this restore, every go
     // build fails [setup failed] on missing modules and NO test ever runs
     // (found via oracle: reference patch graded 0). Harmless for non-Go tasks.
-    const r = await driver.exec(handle, "export HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod; bash /tests/test.sh", {
-      cwd: "/app",
-      timeoutSec: task.verifierTimeoutSec + 300,
-    });
+    // GOMAXPROCS/-p: apptainer does NOT propagate the cgroup CPU quota, so go
+    // sees every host core and OOM-kills runtime/cgo builds inside small
+    // containers (found via oracle: p2p base run [build failed], retry OK).
+    const r = await driver.exec(
+      handle,
+      "export HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod GOMAXPROCS=2; export GOFLAGS=\"${GOFLAGS:-} -p=2\"; bash /tests/test.sh",
+      { cwd: "/app", timeoutSec: task.verifierTimeoutSec + 300 },
+    );
     writeFileSync(join(taskDir, "verify-stdout.txt"), `${r.stdout}\n${r.stderr}`);
 
     const reward = JSON.parse((await driver.readFile(handle, "/logs/verifier/reward.json")).toString("utf8"));
