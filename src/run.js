@@ -50,7 +50,7 @@ export async function runEval(config) {
     runId, jobsDir,
     model, concurrency = 1,
     nTasks, sampleSeed,
-    toolNames, inputTimeoutMs,
+    toolNames, thinkingLevel, inputTimeoutMs,
     agentSlackSec = 600,
     keepContainers = false,
     /** Oracle mode: grade the reference solution instead of an agent run —
