@@ -296,7 +296,12 @@ async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb
     const patch = readFileSync(join(taskDir, "model.patch"));
     await driver.writeFile(handle, "/logs/artifacts/model.patch", patch);
 
-    const r = await driver.exec(handle, "bash /tests/test.sh", {
+    // HOME must point at the image's baked root: the platform's apptainer exec
+    // bind-mounts the HOST home over the container one, shadowing /root/go
+    // (the image's `go mod download` cache) — without this restore, every go
+    // build fails [setup failed] on missing modules and NO test ever runs
+    // (found via oracle: reference patch graded 0). Harmless for non-Go tasks.
+    const r = await driver.exec(handle, "export HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod; bash /tests/test.sh", {
       cwd: "/app",
       timeoutSec: task.verifierTimeoutSec + 300,
     });
