@@ -306,7 +306,10 @@ async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb
     // containers. Small hosts also fail the FIRST build transiently (fork
     // dies on a memory dip, elapsed=0, retry passes) — so warm the build
     // cache with retries BEFORE grading; test.sh then hits only warm builds.
-    const verifyEnv = "export HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod GOMAXPROCS=2 GOFLAGS=\"${GOFLAGS:-} -p=2\"";
+    // GOCACHE must MATCH test.sh's own export (/app/.gocache) — warming a
+    // different cache directory (the default ~/.cache/go-build) leaves the
+    // graded runs cold and the first runtime/cgo build fails again.
+    const verifyEnv = "export HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod GOCACHE=/app/.gocache GOMAXPROCS=2 GOFLAGS=\"${GOFLAGS:-} -p=2\"";
     // Warm with `go vet`: it COMPILES the test binaries (pulling in runtime/cgo,
     // which plain `go build` of pure-Go code never touches) without running
     // tests. A first-build failure inside test.sh doesn't just lose time — the
