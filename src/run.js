@@ -230,8 +230,19 @@ export async function runEval(config) {
       // ---- stage: collect (extract model.patch from the agent container) ----
       if (st.stage !== "collect-done") {
         for (const step of task.collect) {
-          const r = await driver.exec(agentContainer, step.command, { timeoutSec: step.timeoutSec });
+          // HOME=/root for the same shadowed-home reason as verify: collect
+          // runs `git config --global` which writes $HOME/.gitconfig — with
+          // the host home bind-mounted over it, the write fails on the lock
+          // file (found live: qwen38-go2 lost a finished 12.4M-token agent
+          // run to this).
+          const r = await driver.exec(agentContainer, "export HOME=/root; " + step.command, { timeoutSec: step.timeoutSec });
           if (r.exitCode !== 0) {
+            // Keep the container ALIVE on collect failure — the agent's work
+            // lives in its overlay; destroying it here threw away a finished
+            // run's patch (qwen38-go2 lesson). Operator can retry collect or
+            // salvage manually; successful paths destroy as before.
+            log.warn?.(`[${task.id}] collect failed — agent container KEPT for salvage: ${agentContainer?.name}`);
+            agentReleased = true; // skip the finally destroyer
             throw new Error(`verifier.collect failed (exit ${r.exitCode}): ${(r.stderr || r.stdout).slice(0, 300)}`);
           }
         }
