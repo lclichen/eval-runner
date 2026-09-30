@@ -53,6 +53,9 @@ export async function runEval(config) {
     toolNames, inputTimeoutMs,
     agentSlackSec = 600,
     keepContainers = false,
+    /** Oracle mode: grade the reference solution instead of an agent run —
+     * validates the collect→verify→reward chain (expect reward=1). */
+    oracle = false,
     autoResume = true,
     maxResumes = 3,
     onlyTasks = [],
@@ -127,34 +130,53 @@ export async function runEval(config) {
     const taskCpu = cpuOverride ?? task.cpus;
     const taskMemoryMb = memoryOverride ?? task.memoryMb;
 
+    // ---- oracle mode: skip agent+collect, feed the REFERENCE solution patch
+    // through verify → validates the grading chain deterministically (a
+    // correct solution must yield reward=1; anything else is a pipeline bug).
+    if (oracle && st.stage === "pending") {
+      const { readdirSync: rd } = await import("node:fs");
+      const solDir = join(task.dir, "solution");
+      const patches = rd(solDir).filter((f) => f.endsWith(".patch"));
+      if (!patches.length) throw new Error(`oracle: no *.patch in ${solDir}`);
+      const patch = readFileSync(join(solDir, patches[0]));
+      writeFileSync(join(taskDir, "model.patch"), patch);
+      st.patchBytes = patch.length;
+      st.agent = { state: "oracle", stopReason: "oracle" };
+      st.stage = "collect-done";
+      saveState();
+      log.info?.(`[${task.id}] oracle: reference patch ${patch.length}B in place`);
+    }
+
     // ---- stage: container (agent env) ----
     // A journaled container from a previous (crashed) run gets restarted and
     // reused; if it is gone entirely we create a fresh one under the same name.
     let agentContainer;
-    if (st.agentContainerName) {
-      agentContainer = { id: st.agentContainerId, name: st.agentContainerName };
-      try {
-        await driver.startContainer(agentContainer);
-      } catch {
-        agentContainer = null;
+    if (!oracle) {
+      if (st.agentContainerName) {
+        agentContainer = { id: st.agentContainerId, name: st.agentContainerName };
+        try {
+          await driver.startContainer(agentContainer);
+        } catch {
+          agentContainer = null;
+        }
       }
+      if (!agentContainer) {
+        const { imageId } = await driver.ensureImage(task.dockerImage);
+        agentContainer = await driver.createContainer({
+          imageId,
+          name: `dswe-${runId}-${task.id}`.slice(0, 96),
+          cpu: taskCpu,
+          memoryMb: taskMemoryMb,
+          diskGb: Math.ceil(task.storageMb / 1024),
+        });
+        await driver.startContainer(agentContainer);
+        trackContainer(driver, agentContainer);
+        st.agentContainerId = agentContainer.id;
+        st.agentContainerName = agentContainer.name;
+        saveState();
+      }
+      log.info?.(`[${task.id}] container ready (${agentContainer.name})`);
     }
-    if (!agentContainer) {
-      const { imageId } = await driver.ensureImage(task.dockerImage);
-      agentContainer = await driver.createContainer({
-        imageId,
-        name: `dswe-${runId}-${task.id}`.slice(0, 96),
-        cpu: taskCpu,
-        memoryMb: taskMemoryMb,
-        diskGb: Math.ceil(task.storageMb / 1024),
-      });
-      await driver.startContainer(agentContainer);
-      trackContainer(driver, agentContainer);
-      st.agentContainerId = agentContainer.id;
-      st.agentContainerName = agentContainer.name;
-      saveState();
-    }
-    log.info?.(`[${task.id}] container ready (${agentContainer.name})`);
 
     try {
       // ---- stage: agent ----
@@ -240,7 +262,7 @@ export async function runEval(config) {
       st.stage = "done";
       saveState();
     } finally {
-      if (!keepContainers && !agentReleased) {
+      if (agentContainer && !keepContainers && !agentReleased) {
         await driver.stopContainer(agentContainer).catch(() => {});
         if (driver.removeContainer) await driver.removeContainer(agentContainer).catch(() => {});
         untrackContainer(agentContainer);

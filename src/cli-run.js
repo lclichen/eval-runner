@@ -65,6 +65,7 @@ export async function runCommand(args) {
     onlyTasks: Array.isArray(args.only) ? args.only : [],
     ...(args.cpu ? { cpuOverride: Number(args.cpu) } : {}),
     ...(args.memoryMb ? { memoryOverride: Number(args.memoryMb) } : {}),
+    oracle: Boolean(args.oracle),
   });
   console.log(`\nreport: ${join(runDir, "report.md")}`);
   if (failures.length) {
