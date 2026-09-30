@@ -278,7 +278,7 @@ function stageDone(current, target) {
   return STAGES.indexOf(current ?? "pending") >= STAGES.indexOf(target);
 }
 
-async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb }) {
+async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb, log = console }) {
   const { imageId } = await driver.ensureImage(task.dockerImage);
   const handle = await driver.createContainer({
     imageId,
