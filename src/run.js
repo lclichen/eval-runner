@@ -303,10 +303,18 @@ async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb
     // (found via oracle: reference patch graded 0). Harmless for non-Go tasks.
     // GOMAXPROCS/-p: apptainer does NOT propagate the cgroup CPU quota, so go
     // sees every host core and OOM-kills runtime/cgo builds inside small
-    // containers (found via oracle: p2p base run [build failed], retry OK).
+    // containers. Small hosts also fail the FIRST build transiently (fork
+    // dies on a memory dip, elapsed=0, retry passes) — so warm the build
+    // cache with retries BEFORE grading; test.sh then hits only warm builds.
+    const verifyEnv = "export HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod GOMAXPROCS=2 GOFLAGS=\"${GOFLAGS:-} -p=2\"";
+    await driver.exec(
+      handle,
+      `${verifyEnv}; cd /app && for i in 1 2 3 4 5; do go build ./... >/dev/null 2>&1 && { echo warmup-ok; break; }; echo warmup-retry-$i; sleep 3; done`,
+      { cwd: "/app", timeoutSec: 900 },
+    );
     const r = await driver.exec(
       handle,
-      "export HOME=/root GOPATH=/root/go GOMODCACHE=/root/go/pkg/mod GOMAXPROCS=2; export GOFLAGS=\"${GOFLAGS:-} -p=2\"; bash /tests/test.sh",
+      `${verifyEnv}; bash /tests/test.sh`,
       { cwd: "/app", timeoutSec: task.verifierTimeoutSec + 300 },
     );
     writeFileSync(join(taskDir, "verify-stdout.txt"), `${r.stdout}\n${r.stderr}`);
