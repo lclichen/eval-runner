@@ -242,8 +242,9 @@ export async function runEval(config) {
 
       // Release the agent container BEFORE the verifier starts: verify runs in
       // a fresh container from the same image, and small hosts (the 4G test
-      // VM) cannot keep two task-spec containers alive at once.
-      if (!keepContainers) {
+      // VM) cannot keep two task-spec containers alive at once. (Oracle mode
+      // never created one — agentContainer is undefined there.)
+      if (agentContainer && !keepContainers) {
         await driver.stopContainer(agentContainer).catch(() => {});
         if (driver.removeContainer) await driver.removeContainer(agentContainer).catch(() => {});
         untrackContainer(agentContainer);
