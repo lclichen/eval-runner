@@ -190,6 +190,7 @@ export async function runEval(config) {
             model,
             timeoutMs: (task.agentTimeoutSec + agentSlackSec) * 1000,
             toolNames,
+            thinkingLevel,
             inputTimeoutMs,
           });
           st.piwebTaskId = created.taskId;

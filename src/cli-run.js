@@ -64,6 +64,7 @@ export async function runCommand(args) {
     autoResume: !args.noAutoResume,
     onlyTasks: Array.isArray(args.only) ? args.only : [],
     ...(args.cpu ? { cpuOverride: Number(args.cpu) } : {}),
+    ...(args.thinking ? { thinkingLevel: args.thinking } : {}),
     ...(args.memoryMb ? { memoryOverride: Number(args.memoryMb) } : {}),
     oracle: Boolean(args.oracle),
   });

@@ -29,7 +29,7 @@ export class PiWebClient {
    * exactly the built-in container-local tools (bash/read/edit/write/grep/
    * find/ls), no host-side web tools (deep-swe assumes an air-gapped agent).
    */
-  createTask({ containerId, prompt, model, timeoutMs, toolNames, inputTimeoutMs }) {
+  createTask({ containerId, prompt, model, timeoutMs, toolNames, thinkingLevel, inputTimeoutMs }) {
     return this.request("POST", "/api/batch/tasks", {
       mode: "sandbox",
       containerId,
@@ -38,6 +38,7 @@ export class PiWebClient {
       timeoutMs,
       ...(inputTimeoutMs ? { inputTimeoutMs } : {}),
       toolNames: toolNames ?? ["bash", "read", "edit", "write", "grep", "find", "ls"],
+      ...(thinkingLevel ? { thinkingLevel } : {}),
       stream: false,
     });
   }
