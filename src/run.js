@@ -15,6 +15,35 @@ import { renderReport } from "./report.js";
 
 const STAGES = ["pending", "container", "agent", "collect", "verify", "done"];
 
+// Live containers created by THIS process. SIGINT/SIGTERM must destroy them —
+// a killed runner otherwise leaks verify/agent containers until the platform
+// quota fills (observed: two orphans after timeout-killed runs). Idempotent
+// stop→destroy; best-effort, never blocks exit for long.
+const liveContainers = [];
+function trackContainer(driver, handle) {
+  liveContainers.push({ driver, handle });
+}
+function untrackContainer(handle) {
+  const i = liveContainers.findIndex((e) => e.handle.id === handle.id);
+  if (i >= 0) liveContainers.splice(i, 1);
+}
+let cleaningUp = false;
+async function cleanupLiveContainers(reason) {
+  if (cleaningUp) return;
+  cleaningUp = true;
+  if (liveContainers.length === 0) process.exit(0);
+  console.error(`[${reason}] destroying ${liveContainers.length} live container(s)...`);
+  const deadline = Date.now() + 15_000;
+  await Promise.allSettled(liveContainers.map(async ({ driver, handle }) => {
+    await driver.stopContainer(handle).catch(() => {});
+    if (driver.removeContainer) await driver.removeContainer(handle).catch(() => {});
+  }));
+  if (Date.now() > deadline) console.error("[cleanup] slow container teardown; exiting anyway");
+  process.exit(0);
+}
+process.on("SIGINT", () => void cleanupLiveContainers("SIGINT"));
+process.on("SIGTERM", () => void cleanupLiveContainers("SIGTERM"));
+
 export async function runEval(config) {
   const {
     tasksRoot, driver, piweb,
@@ -120,6 +149,7 @@ export async function runEval(config) {
         diskGb: Math.ceil(task.storageMb / 1024),
       });
       await driver.startContainer(agentContainer);
+      trackContainer(driver, agentContainer);
       st.agentContainerId = agentContainer.id;
       st.agentContainerName = agentContainer.name;
       saveState();
@@ -194,6 +224,7 @@ export async function runEval(config) {
       if (!keepContainers) {
         await driver.stopContainer(agentContainer).catch(() => {});
         if (driver.removeContainer) await driver.removeContainer(agentContainer).catch(() => {});
+        untrackContainer(agentContainer);
         agentReleased = true;
       }
 
@@ -212,6 +243,7 @@ export async function runEval(config) {
       if (!keepContainers && !agentReleased) {
         await driver.stopContainer(agentContainer).catch(() => {});
         if (driver.removeContainer) await driver.removeContainer(agentContainer).catch(() => {});
+        untrackContainer(agentContainer);
       }
     }
   }
@@ -257,5 +289,6 @@ async function verifyTask(task, taskDir, driver, { keepContainers, cpu, memoryMb
       await driver.stopContainer(handle).catch(() => {});
       if (driver.removeContainer) await driver.removeContainer(handle).catch(() => {});
     }
+    untrackContainer(handle);
   }
 }
